@@ -1,4 +1,4 @@
-import app from "./src/app.js";
+import app from "./src/app.js"
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 
@@ -6,6 +6,7 @@ dotenv.config();
 
 const PORT = process.env.PORT || 8080;
 const MONGO_URI = process.env.MONGO_URI;
+
 
 mongoose
   .connect(MONGO_URI)

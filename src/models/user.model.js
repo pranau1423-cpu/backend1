@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 
+
 const sessionSchema = new mongoose.Schema({
   deviceInfo: { type: String, default: "" },
   refreshTokenHash: { type: String, required: true },
@@ -51,7 +52,7 @@ const userSchema = new mongoose.Schema({
   },
   lastLogin: Date
 }, {
-  timestamps: true
+  timestamps: true,
 });
 
 // Index for faster queries

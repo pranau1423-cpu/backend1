@@ -45,7 +45,7 @@ const WorkerSchema = new mongoose.Schema({
       type: [Number],
     },
   },
-  
+
   // Flag system
   flags: {
     type: Number,
@@ -102,4 +102,5 @@ WorkerSchema.pre('save', function(next) {
   next();
 });
 
-export default mongoose.model("Worker", WorkerSchema);
+const Worker = mongoose.model("Worker", WorkerSchema);
+export default Worker
