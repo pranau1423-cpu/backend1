@@ -64,20 +64,41 @@ router.get("/", optionalAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch workers" });
   }
 });
-
 // Get single worker by ID (public)
 router.get("/:id", optionalAuth, async (req, res) => {
   try {
-    const worker = await Worker.findById(req.params.id)
-      .select('-history -aadhaarNumber'); // Hide sensitive data for public
+    const { id } = req.params;
+    
+    // ✅ ADD VALIDATION
+    if (!id || id === 'undefined' || id === 'null') {
+      return res.status(400).json({ 
+        error: "Invalid worker ID",
+        message: "Worker ID is required"
+      });
+    }
+
+    // ✅ CHECK IF VALID MONGODB ID
+    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ 
+        error: "Invalid worker ID format",
+        message: "ID must be a valid MongoDB ObjectId"
+      });
+    }
+
+    const worker = await Worker.findById(id)
+      .select('-history -aadhaarNumber');
       
     if (!worker) {
       return res.status(404).json({ error: "Worker not found" });
     }
+    
     res.json({ worker });
   } catch (err) {
     console.error("Fetch worker error:", err);
-    res.status(500).json({ error: "Failed to fetch worker" });
+    res.status(500).json({ 
+      error: "Failed to fetch worker",
+      details: err.message 
+    });
   }
 });
 
