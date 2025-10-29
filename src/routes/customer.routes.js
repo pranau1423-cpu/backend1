@@ -4,10 +4,10 @@ import { authenticate } from "../middleware/auth.middleware.js";
 import { wrapAsync } from "../utils/wrapAsync.js";
 import Customer from "../models/Customer.js";
 
-const router = express.Router();
+const CustomerRoutes = express.Router();
 
 // Save/Update customer profile
-router.post(
+CustomerRoutes.post(
   "/save",
   authenticate,
   wrapAsync(async (req, res) => {
@@ -82,7 +82,7 @@ router.post(
 );
 
 // Get customer profile
-router.get(
+CustomerRoutes.get(
   "/profile",
   authenticate,
   wrapAsync(async (req, res) => {
@@ -98,4 +98,4 @@ router.get(
   })
 );
 
-export default router;
+export default CustomerRoutes;
