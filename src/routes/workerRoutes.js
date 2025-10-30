@@ -69,12 +69,12 @@ router.get("/", optionalAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch workers" });
   }
 });
+
 // Get single worker by ID (public)
 router.get("/:id", optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // ✅ ADD VALIDATION
     if (!id || id === "undefined" || id === "null") {
       return res.status(400).json({
         error: "Invalid worker ID",
@@ -82,7 +82,6 @@ router.get("/:id", optionalAuth, async (req, res) => {
       });
     }
 
-    // ✅ CHECK IF VALID MONGODB ID
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({
         error: "Invalid worker ID format",
@@ -157,27 +156,37 @@ router.post(
     { name: "aadhaar", maxCount: 1 },
   ]),
   async (req, res) => {
+    console.log("---- /generate-card START ----");
+
     try {
       const { text, aadhaarNumber } = req.body;
+      console.log("User ID:", req.user?.id);
+      console.log("Text received:", text);
+      console.log("Aadhaar received:", aadhaarNumber);
+      console.log("Files received:", req.files);
 
       if (!text) {
         return res.status(400).json({
-          error: "No text provided",
-          message: "Please provide 'text' field in request body",
+          error: "Missing text description",
+          message: "Please provide a description of the worker.",
         });
       }
 
-      console.log("Text received:", text);
-      console.log("Aadhaar number received:", aadhaarNumber);
-
-      // Validate Aadhaar number if provided
+      // Validate Aadhaar number if present
       let validatedAadhaar = null;
       if (aadhaarNumber) {
         const validation = validateAadhaar(aadhaarNumber);
         if (!validation.valid) {
-          if (req.files?.photo?.[0]?.path)
+          // Clean up uploaded files
+          if (
+            req.files?.photo?.[0]?.path &&
+            fs.existsSync(req.files.photo[0].path)
+          )
             fs.unlinkSync(req.files.photo[0].path);
-          if (req.files?.aadhaar?.[0]?.path)
+          if (
+            req.files?.aadhaar?.[0]?.path &&
+            fs.existsSync(req.files.aadhaar[0].path)
+          )
             fs.unlinkSync(req.files.aadhaar[0].path);
           return res.status(400).json({
             error: "Invalid Aadhaar number",
@@ -187,258 +196,169 @@ router.post(
         validatedAadhaar = validation.cleanNumber;
       }
 
-      // Upload photo if provided
+      // Upload photo if present
       let profileImageUrl = null;
       if (req.files?.photo?.[0]) {
-        const photoResult = await cloudinary.uploader.upload(
-          req.files.photo[0].path,
-          {
-            folder: "worker-photos",
-            resource_type: "image",
-            transformation: [
-              { width: 500, height: 500, crop: "fill" },
-              { quality: "auto" },
-            ],
-          }
-        );
-        profileImageUrl = photoResult.secure_url;
-        fs.unlinkSync(req.files.photo[0].path);
+        try {
+          const photoResult = await cloudinary.uploader.upload(
+            req.files.photo[0].path,
+            {
+              folder: "worker-photos",
+              resource_type: "image",
+              transformation: [
+                { width: 500, height: 500, crop: "fill" },
+                { quality: "auto" },
+              ],
+            }
+          );
+          profileImageUrl = photoResult.secure_url;
+          console.log("Photo uploaded:", profileImageUrl);
+        } catch (err) {
+          console.error("Cloudinary Photo Upload Error:", err);
+          return res.status(500).json({
+            error: "Photo upload failed",
+            details: err.message,
+          });
+        } finally {
+          if (
+            req.files.photo[0]?.path &&
+            fs.existsSync(req.files.photo[0].path)
+          )
+            fs.unlinkSync(req.files.photo[0].path);
+        }
       }
 
-      // Upload Aadhaar card if provided
+      // Upload Aadhaar if present
       let aadhaarUrl = null;
       if (req.files?.aadhaar?.[0]) {
-        const aadhaarResult = await cloudinary.uploader.upload(
-          req.files.aadhaar[0].path,
-          {
-            folder: "worker-aadhaar",
-            resource_type: "image",
-          }
-        );
-        aadhaarUrl = aadhaarResult.secure_url;
-        fs.unlinkSync(req.files.aadhaar[0].path);
+        try {
+          const aadhaarResult = await cloudinary.uploader.upload(
+            req.files.aadhaar[0].path,
+            {
+              folder: "worker-aadhaar",
+              resource_type: "image",
+            }
+          );
+          aadhaarUrl = aadhaarResult.secure_url;
+          console.log("Aadhaar uploaded:", aadhaarUrl);
+        } catch (err) {
+          console.error("Cloudinary Aadhaar Upload Error:", err);
+          return res.status(500).json({
+            error: "Aadhaar upload failed",
+            details: err.message,
+          });
+        } finally {
+          if (
+            req.files.aadhaar[0]?.path &&
+            fs.existsSync(req.files.aadhaar[0].path)
+          )
+            fs.unlinkSync(req.files.aadhaar[0].path);
+        }
       }
 
-      // Generate data from Gemini
-      // Inside routes/worker.routes.js
+      // Call Gemini AI
+      let cardData;
+      try {
+        console.log("Calling Gemini API...");
+        const model = genAI.getGenerativeModel({
+          model: "gemini-2.0-flash-exp",
+        });
 
-      router.post(
-        "/generate-card",
-        authenticate,
-        upload.fields([
-          { name: "photo", maxCount: 1 },
-          { name: "aadhaar", maxCount: 1 },
-        ]),
-        async (req, res) => {
-          console.log("---- /generate-card START ----");
+        const prompt = `
+Extract and structure this user description into valid JSON.
+Format:
+{
+  "fullName": "",
+  "profession": "",
+  "experience": "",
+  "skills": [],
+  "endorsements": [],
+  "verified": false,
+  "voiceText": ""
+}
+Return ONLY JSON (no markdown, no extra text).
+User description: ${text}
+`;
 
-          try {
-            const { text, aadhaarNumber } = req.body;
-            console.log("User ID:", req.user?.id);
-            console.log("Text received:", text);
-            console.log("Aadhaar received:", aadhaarNumber);
-            console.log("Files received:", req.files);
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.text();
+        console.log("Gemini Raw Response:", responseText);
 
-            if (!text) {
-              return res.status(400).json({
-                error: "Missing text description",
-                message: "Please provide a description of the worker.",
-              });
-            }
+        const cleanText = responseText.replace(/```(?:json)?|```/g, "").trim();
+        cardData = JSON.parse(cleanText);
+        console.log("Parsed cardData:", cardData);
+      } catch (err) {
+        console.error("Gemini AI or JSON Parse Error:", err);
+        return res.status(500).json({
+          error: "AI failed to extract details",
+          details: err.message,
+        });
+      }
 
-            // 🔹 Validate Aadhaar number if present
-            let validatedAadhaar = null;
-            if (aadhaarNumber) {
-              const validation = validateAadhaar(aadhaarNumber);
-              if (!validation.valid) {
-                return res.status(400).json({
-                  error: "Invalid Aadhaar number",
-                  message: validation.message,
-                });
-              }
-              validatedAadhaar = validation.cleanNumber;
-            }
+      // Validate Gemini output
+      if (!cardData.fullName || !cardData.profession) {
+        console.error("AI response missing key fields:", cardData);
+        return res.status(400).json({
+          error:
+            "AI failed to extract required details (name or profession missing)",
+          details: cardData,
+        });
+      }
 
-            // 🔹 Upload photo if present
-            let profileImageUrl = null;
-            if (req.files?.photo?.[0]) {
-              try {
-                const photoResult = await cloudinary.uploader.upload(
-                  req.files.photo[0].path,
-                  {
-                    folder: "worker-photos",
-                    resource_type: "image",
-                    transformation: [
-                      { width: 500, height: 500, crop: "fill" },
-                      { quality: "auto" },
-                    ],
-                  }
-                );
-                profileImageUrl = photoResult.secure_url;
-              } catch (err) {
-                console.error("Cloudinary Photo Upload Error:", err);
-                return res
-                  .status(500)
-                  .json({ error: "Photo upload failed", details: err.message });
-              } finally {
-                if (
-                  req.files.photo[0]?.path &&
-                  fs.existsSync(req.files.photo[0].path)
-                )
-                  fs.unlinkSync(req.files.photo[0].path);
-              }
-            }
+      // Ensure skills is an array
+      if (typeof cardData.skills === "string") {
+        cardData.skills = [cardData.skills];
+      }
+      if (!Array.isArray(cardData.skills)) {
+        cardData.skills = [];
+      }
 
-            // 🔹 Upload Aadhaar if present
-            let aadhaarUrl = null;
-            if (req.files?.aadhaar?.[0]) {
-              try {
-                const aadhaarResult = await cloudinary.uploader.upload(
-                  req.files.aadhaar[0].path,
-                  {
-                    folder: "worker-aadhaar",
-                    resource_type: "image",
-                  }
-                );
-                aadhaarUrl = aadhaarResult.secure_url;
-              } catch (err) {
-                console.error("Cloudinary Aadhaar Upload Error:", err);
-                return res
-                  .status(500)
-                  .json({
-                    error: "Aadhaar upload failed",
-                    details: err.message,
-                  });
-              } finally {
-                if (
-                  req.files.aadhaar[0]?.path &&
-                  fs.existsSync(req.files.aadhaar[0].path)
-                )
-                  fs.unlinkSync(req.files.aadhaar[0].path);
-              }
-            }
+      // Add image & Aadhaar URLs
+      if (profileImageUrl) cardData.profileImageUrl = profileImageUrl;
+      if (aadhaarUrl) cardData.aadhaarUrl = aadhaarUrl;
+      if (validatedAadhaar) cardData.aadhaarNumber = validatedAadhaar;
 
-            // 🔹 Call Gemini AI
-            let cardData;
-            try {
-              console.log("Calling Gemini API...");
-              const model = genAI.getGenerativeModel({
-                model: "gemini-2.0-flash-exp",
-              });
+      // Save to MongoDB
+      try {
+        const worker = new Worker({
+          ...cardData,
+          createdBy: req.user.id,
+          history: [
+            {
+              action: "CREATED",
+              description: "Worker card auto-generated via AI",
+              timestamp: new Date(),
+              metadata: { userId: req.user.id },
+            },
+          ],
+        });
 
-              const prompt = `
-          Extract and structure this user description into valid JSON.
-          Format:
-          {
-            "fullName": "",
-            "profession": "",
-            "experience": "",
-            "skills": [],
-            "endorsements": [],
-            "verified": false,
-            "voiceText": ""
-          }
-          Return ONLY JSON (no markdown, no extra text).
-          User description: ${text}
-        `;
+        await worker.save();
+        console.log("✅ Worker saved successfully:", worker._id);
 
-              const result = await model.generateContent(prompt);
-              const responseText = result.response.text();
-              console.log("Gemini Raw Response:", responseText);
+        // Link to user profile
+        await User.findByIdAndUpdate(req.user.id, {
+          workerProfile: worker._id,
+          role: "worker",
+        });
+        console.log("✅ User profile updated");
 
-              const cleanText = responseText
-                .replace(/```(?:json)?|```/g, "")
-                .trim();
-              cardData = JSON.parse(cleanText);
-            } catch (err) {
-              console.error("Gemini AI or JSON Parse Error:", err);
-              return res.status(500).json({
-                error: "Gemini AI failed or returned invalid JSON",
-                details: err.message,
-              });
-            }
-
-            // 🔹 Validate Gemini output
-            if (!cardData.fullName || !cardData.profession) {
-              console.error("AI response missing key fields:", cardData);
-              return res.status(400).json({
-                error: "AI failed to extract required details",
-                details: cardData,
-              });
-            }
-
-            // Ensure skills array
-            if (typeof cardData.skills === "string") {
-              cardData.skills = [cardData.skills];
-            }
-
-            // 🔹 Add image & Aadhaar URLs
-            if (profileImageUrl) cardData.profileImageUrl = profileImageUrl;
-            if (aadhaarUrl) cardData.aadhaarUrl = aadhaarUrl;
-            if (validatedAadhaar) cardData.aadhaarNumber = validatedAadhaar;
-
-            // 🔹 Save to MongoDB
-            try {
-              const worker = new Worker({
-                ...cardData,
-                createdBy: req.user.id,
-                history: [
-                  {
-                    action: "CREATED",
-                    description: "Worker card auto-generated via AI",
-                    timestamp: new Date(),
-                    metadata: { userId: req.user.id },
-                  },
-                ],
-              });
-
-              await worker.save();
-
-              // Link to user profile
-              await User.findByIdAndUpdate(req.user.id, {
-                workerProfile: worker._id,
-                role: "worker",
-              });
-
-              console.log("✅ Worker saved successfully:", worker._id);
-              return res.status(201).json({
-                success: true,
-                message: "Worker card generated successfully",
-                worker,
-              });
-            } catch (dbErr) {
-              console.error("MongoDB Save Error:", dbErr);
-              return res
-                .status(500)
-                .json({ error: "MongoDB save failed", details: dbErr.message });
-            }
-          } catch (err) {
-            console.error("Unexpected /generate-card Error:", err);
-            return res.status(500).json({
-              error: "AI processing or MongoDB save failed",
-              details: err.message,
-            });
-          }
-        }
-      );
-
-      await worker.save();
-
-      // Update user profile to link worker
-      await User.findByIdAndUpdate(req.user.id, {
-        workerProfile: worker._id,
-        role: "worker",
-      });
-
-      console.log("✅ Worker auto-saved:", worker._id);
-
-      res.json({
-        success: true,
-        message: "Worker card generated and saved successfully",
-        worker,
-      });
+        return res.status(201).json({
+          success: true,
+          message: "Worker card generated successfully",
+          worker,
+        });
+      } catch (dbErr) {
+        console.error("MongoDB Save Error:", dbErr);
+        return res.status(500).json({
+          error: "Database save failed",
+          details: dbErr.message,
+        });
+      }
     } catch (err) {
-      console.error("Text processing error:", err);
+      console.error("Unexpected /generate-card Error:", err);
+
+      // Clean up any uploaded files
       if (
         req.files?.photo?.[0]?.path &&
         fs.existsSync(req.files.photo[0].path)
@@ -451,8 +371,9 @@ router.post(
       ) {
         fs.unlinkSync(req.files.aadhaar[0].path);
       }
-      res.status(500).json({
-        error: "AI processing or MongoDB save failed",
+
+      return res.status(500).json({
+        error: "Worker card generation failed",
         details: err.message,
       });
     }
@@ -581,7 +502,7 @@ router.post("/:id/flag", authenticate, async (req, res) => {
 router.post("/:id/endorsement", authenticate, async (req, res) => {
   try {
     const { id } = req.params;
-    const { endorsementId, endorserName, endorsementText } = req.body;
+    const { endorserName, endorsementText } = req.body;
 
     const worker = await Worker.findById(id);
     if (!worker) {
