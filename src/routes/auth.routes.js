@@ -7,16 +7,18 @@ import { authenticate } from "../middleware/auth.middleware.js";
 import {
   register,
   login,
+  emailLogin,
   refresh,
   logout,
   me,
   sessions,
-  revokeSession
+  revokeSession,
 } from "../controllers/auth.controller.js";
 
 // Public routes
 router.post("/register", wrapAsync(register));
-router.post("/login", wrapAsync(login));
+router.post("/login", wrapAsync(login)); // Mobile + OTP login
+router.post("/email-login", wrapAsync(emailLogin)); // Email + Password login
 router.post("/refresh", wrapAsync(refresh));
 router.post("/logout", wrapAsync(logout));
 

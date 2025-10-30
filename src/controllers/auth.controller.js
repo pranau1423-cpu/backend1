@@ -73,7 +73,10 @@ const register = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Registration error:", err);
-    res.status(500).json({ error: "Registration failed" });
+    res.status(500).json({
+      error: "Registration failed",
+      details: err.message,
+    });
   }
 };
 
@@ -164,6 +167,91 @@ const login = async (req, res) => {
 };
 
 /* ==============================
+   EMAIL LOGIN (EMAIL + PASSWORD)
+   ============================== */
+const emailLogin = async (req, res) => {
+  const { email, password, deviceInfo } = req.body;
+  console.log("🔐 Email login request:", email);
+
+  if (!email || !password) {
+    return res.status(400).json({
+      error: "Email and password are required",
+    });
+  }
+
+  try {
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(401).json({
+        error: "Invalid email or password",
+      });
+    }
+
+    if (!user.passwordHash) {
+      return res.status(401).json({
+        error: "This account uses mobile login",
+      });
+    }
+
+    const isValid = await verifyPassword(user.passwordHash, password);
+    if (!isValid) {
+      return res.status(401).json({
+        error: "Invalid email or password",
+      });
+    }
+
+    // Create tokens
+    const access = signAccess({ sub: user._id, role: user.role });
+    const rid = genRefreshId();
+    const refresh = signRefresh({ sub: user._id, rid });
+
+    const hashed = cryptoHash(rid);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000);
+
+    user.sessions.push({
+      deviceInfo: deviceInfo || req.get("User-Agent") || "Unknown device",
+      refreshTokenHash: hashed,
+      createdAt: new Date(),
+      lastUsedAt: new Date(),
+      expiresAt,
+    });
+
+    if (user.sessions.length > 5) {
+      user.sessions = user.sessions.slice(-5);
+    }
+
+    user.lastLogin = new Date();
+    await user.save();
+
+    res.cookie(COOKIE_NAME, refresh, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/",
+      maxAge: 30 * 24 * 3600 * 1000,
+    });
+
+    console.log("✅ Email login success:", user.email, "Role:", user.role);
+
+    res.json({
+      success: true,
+      access,
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Email login error:", err);
+    res.status(500).json({
+      error: "Login failed",
+      details: err.message,
+    });
+  }
+};
+
+/* ==============================
    REFRESH TOKEN
    ============================== */
 const refresh = async (req, res) => {
@@ -178,7 +266,7 @@ const refresh = async (req, res) => {
   let payload;
   try {
     payload = verifyRefresh(token);
-  } catch {
+  } catch (err) {
     res.clearCookie(COOKIE_NAME, { path: "/" });
     return res.status(401).json({
       error: "Invalid or expired refresh token",
@@ -186,44 +274,54 @@ const refresh = async (req, res) => {
     });
   }
 
-  const user = await User.findById(payload.sub);
-  if (!user) {
-    res.clearCookie(COOKIE_NAME, { path: "/" });
-    return res.status(401).json({ error: "User not found" });
-  }
+  try {
+    const user = await User.findById(payload.sub);
+    if (!user) {
+      res.clearCookie(COOKIE_NAME, { path: "/" });
+      return res.status(401).json({ error: "User not found" });
+    }
 
-  const hashed = cryptoHash(payload.rid);
-  const session = user.sessions.find((s) => s.refreshTokenHash === hashed);
+    const hashed = cryptoHash(payload.rid);
+    const session = user.sessions.find((s) => s.refreshTokenHash === hashed);
 
-  if (!session) {
-    res.clearCookie(COOKIE_NAME, { path: "/" });
-    return res.status(401).json({ error: "Session not found" });
-  }
+    if (!session) {
+      res.clearCookie(COOKIE_NAME, { path: "/" });
+      return res.status(401).json({ error: "Session not found" });
+    }
 
-  if (session.expiresAt < new Date()) {
-    user.sessions = user.sessions.filter((s) => s.refreshTokenHash !== hashed);
+    if (session.expiresAt < new Date()) {
+      user.sessions = user.sessions.filter(
+        (s) => s.refreshTokenHash !== hashed
+      );
+      await user.save();
+      res.clearCookie(COOKIE_NAME, { path: "/" });
+      return res.status(401).json({ error: "Session expired" });
+    }
+
+    const newRid = genRefreshId();
+    const newRefresh = signRefresh({ sub: user._id, rid: newRid });
+    session.refreshTokenHash = cryptoHash(newRid);
+    session.lastUsedAt = new Date();
     await user.save();
-    res.clearCookie(COOKIE_NAME, { path: "/" });
-    return res.status(401).json({ error: "Session expired" });
+
+    const newAccess = signAccess({ sub: user._id, role: user.role });
+
+    res.cookie(COOKIE_NAME, newRefresh, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      path: "/",
+      maxAge: 30 * 24 * 3600 * 1000,
+    });
+
+    res.json({ success: true, access: newAccess });
+  } catch (err) {
+    console.error("❌ Refresh error:", err);
+    res.status(500).json({
+      error: "Token refresh failed",
+      details: err.message,
+    });
   }
-
-  const newRid = genRefreshId();
-  const newRefresh = signRefresh({ sub: user._id, rid: newRid });
-  session.refreshTokenHash = cryptoHash(newRid);
-  session.lastUsedAt = new Date();
-  await user.save();
-
-  const newAccess = signAccess({ sub: user._id, role: user.role });
-
-  res.cookie(COOKIE_NAME, newRefresh, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-    path: "/",
-    maxAge: 30 * 24 * 3600 * 1000,
-  });
-
-  res.json({ success: true, access: newAccess });
 };
 
 /* ==============================
@@ -264,8 +362,12 @@ const me = async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json({ user });
-  } catch {
-    res.status(500).json({ error: "Failed to fetch user info" });
+  } catch (err) {
+    console.error("❌ Fetch user error:", err);
+    res.status(500).json({
+      error: "Failed to fetch user info",
+      details: err.message,
+    });
   }
 };
 
@@ -283,8 +385,12 @@ const sessions = async (req, res) => {
     }));
 
     res.json({ sessions: sanitizedSessions });
-  } catch {
-    res.status(500).json({ error: "Failed to fetch sessions" });
+  } catch (err) {
+    console.error("❌ Fetch sessions error:", err);
+    res.status(500).json({
+      error: "Failed to fetch sessions",
+      details: err.message,
+    });
   }
 };
 
@@ -302,9 +408,22 @@ const revokeSession = async (req, res) => {
 
     await user.save();
     res.json({ success: true, message: "Session revoked successfully" });
-  } catch {
-    res.status(500).json({ error: "Failed to revoke session" });
+  } catch (err) {
+    console.error("❌ Revoke session error:", err);
+    res.status(500).json({
+      error: "Failed to revoke session",
+      details: err.message,
+    });
   }
 };
 
-export { register, login, refresh, logout, me, sessions, revokeSession };
+export {
+  register,
+  login,
+  emailLogin,
+  refresh,
+  logout,
+  me,
+  sessions,
+  revokeSession,
+};

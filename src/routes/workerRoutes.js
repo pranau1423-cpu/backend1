@@ -11,6 +11,16 @@ import {
   authorize,
   optionalAuth,
 } from "../middleware/auth.middleware.js";
+import {
+  getAllWorkers,
+  getWorkerById,
+  getWorkerProfile,
+  getNearbyWorkers,
+  searchWorkers,
+  updateAvailability,
+  getWorkerStats,
+  contactWorker,
+} from "../controllers/worker.controller.js";
 
 dotenv.config();
 const router = express.Router();
@@ -41,73 +51,30 @@ function validateAadhaar(aadhaarNumber) {
   return { valid: true, cleanNumber };
 }
 
+// ============================================
 // PUBLIC ROUTES (no auth required)
+// ============================================
 
-// Get all workers (public viewing)
-router.get("/", optionalAuth, async (req, res) => {
-  try {
-    const { profession, verified, search } = req.query;
-    const filter = {};
+// Get all workers with optional filtering (from controller)
+router.get("/", optionalAuth, getAllWorkers);
 
-    if (profession) filter.profession = new RegExp(profession, "i");
-    if (verified === "true") filter.verified = true;
-    if (search) {
-      filter.$or = [
-        { fullName: new RegExp(search, "i") },
-        { profession: new RegExp(search, "i") },
-        { skills: new RegExp(search, "i") },
-      ];
-    }
+// Search workers (from controller)
+router.get("/search", optionalAuth, searchWorkers);
 
-    const workers = await Worker.find(filter)
-      .select("-history -aadhaarNumber") // Hide sensitive data
-      .sort({ createdAt: -1 });
+// Get single worker by ID - public view (from controller)
+router.get("/worker/:id", optionalAuth, getWorkerById);
 
-    res.json({ workers, count: workers.length });
-  } catch (err) {
-    console.error("Fetch workers error:", err);
-    res.status(500).json({ error: "Failed to fetch workers" });
-  }
-});
+// Get worker statistics (from controller)
+router.get("/:id/stats", optionalAuth, getWorkerStats);
 
-// Get single worker by ID (public)
-router.get("/:id", optionalAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
+// Get nearby workers (from controller)
+router.post("/nearby", optionalAuth, getNearbyWorkers);
 
-    if (!id || id === "undefined" || id === "null") {
-      return res.status(400).json({
-        error: "Invalid worker ID",
-        message: "Worker ID is required",
-      });
-    }
-
-    if (!id.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({
-        error: "Invalid worker ID format",
-        message: "ID must be a valid MongoDB ObjectId",
-      });
-    }
-
-    const worker = await Worker.findById(id).select("-history -aadhaarNumber");
-
-    if (!worker) {
-      return res.status(404).json({ error: "Worker not found" });
-    }
-
-    res.json({ worker });
-  } catch (err) {
-    console.error("Fetch worker error:", err);
-    res.status(500).json({
-      error: "Failed to fetch worker",
-      details: err.message,
-    });
-  }
-});
-
+// ============================================
 // PROTECTED ROUTES (authentication required)
+// ============================================
 
-// Upload worker photo (authenticated users only)
+// Upload worker photo
 router.post(
   "/upload-photo",
   authenticate,
@@ -147,7 +114,7 @@ router.post(
   }
 );
 
-// Generate worker card (authenticated users only)
+// Generate worker card
 router.post(
   "/generate-card",
   authenticate,
@@ -445,7 +412,16 @@ router.put("/:id", authenticate, async (req, res) => {
   }
 });
 
-// Flag a Worker (authenticated users can flag, auto-delete after threshold)
+// Get full worker profile (owner/admin only) - from controller
+router.get("/profile/:id", authenticate, getWorkerProfile);
+
+// Update availability - from controller
+router.patch("/:id/availability", authenticate, updateAvailability);
+
+// Contact worker - from controller
+router.post("/:id/contact", authenticate, contactWorker);
+
+// Flag a Worker
 router.post("/:id/flag", authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -460,7 +436,6 @@ router.post("/:id/flag", authenticate, async (req, res) => {
       return res.status(404).json({ error: "Worker not found" });
     }
 
-    // Initialize flag data
     worker.flags = (worker.flags || 0) + 1;
     worker.flagReasons = worker.flagReasons || [];
     worker.flagReasons.push({
@@ -469,7 +444,6 @@ router.post("/:id/flag", authenticate, async (req, res) => {
       date: new Date(),
     });
 
-    // Auto-delete if flags exceed threshold (e.g., 3 flags)
     const FLAG_THRESHOLD = 3;
     if (worker.flags >= FLAG_THRESHOLD) {
       await Worker.findByIdAndDelete(id);
@@ -498,7 +472,7 @@ router.post("/:id/flag", authenticate, async (req, res) => {
   }
 });
 
-// Accept Endorsement (worker owner only)
+// Accept Endorsement
 router.post("/:id/endorsement", authenticate, async (req, res) => {
   try {
     const { id } = req.params;
@@ -509,12 +483,10 @@ router.post("/:id/endorsement", authenticate, async (req, res) => {
       return res.status(404).json({ error: "Worker not found" });
     }
 
-    // Only owner can accept endorsements
     if (worker.createdBy?.toString() !== req.user.id) {
       return res.status(403).json({ error: "Not authorized" });
     }
 
-    // Add endorsement
     worker.endorsements.push({
       endorserName: endorserName || "Anonymous",
       text: endorsementText || "Endorsed",
@@ -537,7 +509,7 @@ router.post("/:id/endorsement", authenticate, async (req, res) => {
   }
 });
 
-// Get worker history (owner or admin only)
+// Get worker history
 router.get("/:id/history", authenticate, async (req, res) => {
   try {
     const worker = await Worker.findById(req.params.id);
@@ -545,7 +517,6 @@ router.get("/:id/history", authenticate, async (req, res) => {
       return res.status(404).json({ error: "Worker not found" });
     }
 
-    // Check authorization
     if (
       worker.createdBy?.toString() !== req.user.id &&
       req.user.role !== "admin"
@@ -560,9 +531,11 @@ router.get("/:id/history", authenticate, async (req, res) => {
   }
 });
 
+// ============================================
 // ADMIN ONLY ROUTES
+// ============================================
 
-// Delete worker (admin only)
+// Delete worker
 router.delete("/:id", authenticate, authorize("admin"), async (req, res) => {
   try {
     const worker = await Worker.findByIdAndDelete(req.params.id);
