@@ -1,4 +1,3 @@
-// src/app.js
 import "./config/config.js";
 import express from "express";
 import cors from "cors";
@@ -26,6 +25,12 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// Debug middleware to log all requests
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/worker", workerRoutes);
@@ -38,9 +43,11 @@ app.get("/health", (req, res) => {
 
 // 404 handler
 app.use((req, res) => {
+  console.log(`404 - Route not found: ${req.method} ${req.path}`);
   res.status(404).json({
     error: "Route not found",
     path: req.path,
+    method: req.method,
   });
 });
 
