@@ -48,7 +48,6 @@ const userSchema = new mongoose.Schema(
     workerProfile: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Worker",
-      default: null,
     },
     verified: {
       type: Boolean,

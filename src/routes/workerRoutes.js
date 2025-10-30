@@ -306,11 +306,11 @@ User description: ${text}
         console.log("✅ Worker saved successfully:", worker._id);
 
         // Link to user profile
-        await User.findByIdAndUpdate(req.user.id, {
+        const x = await User.findByIdAndUpdate(req.user.id, {
           workerProfile: worker._id,
           role: "worker",
         });
-        console.log("✅ User profile updated");
+        console.log("✅ User profile updated", x);
 
         // ⭐ RETURN COMPLETE WORKER DATA WITH ALL FIELDS
         return res.status(201).json({
