@@ -1,3 +1,4 @@
+// src/routes/workerRoutes.js - Complete File
 import express from "express";
 import multer from "multer";
 import fs from "fs";
@@ -61,6 +62,7 @@ router.get("/", optionalAuth, getAllWorkers);
 // Search workers (from controller)
 router.get("/search", optionalAuth, searchWorkers);
 
+// ⭐ IMPORTANT: This route MUST come BEFORE other /:id routes
 // Get single worker by ID - public view (from controller)
 router.get("/worker/:id", optionalAuth, getWorkerById);
 
@@ -310,10 +312,29 @@ User description: ${text}
         });
         console.log("✅ User profile updated");
 
+        // ⭐ RETURN COMPLETE WORKER DATA WITH ALL FIELDS
         return res.status(201).json({
           success: true,
           message: "Worker card generated successfully",
-          worker,
+          worker: {
+            _id: worker._id,
+            fullName: worker.fullName,
+            profession: worker.profession,
+            experience: worker.experience,
+            skills: worker.skills,
+            endorsements: worker.endorsements,
+            verified: worker.verified,
+            profileImageUrl: worker.profileImageUrl,
+            aadhaarNumber: worker.aadhaarNumber,
+            aadhaarUrl: worker.aadhaarUrl,
+            voiceText: worker.voiceText,
+            geometry: worker.geometry,
+            flags: worker.flags,
+            flagReasons: worker.flagReasons,
+            createdBy: worker.createdBy,
+            createdAt: worker.createdAt,
+            updatedAt: worker.updatedAt,
+          },
         });
       } catch (dbErr) {
         console.error("MongoDB Save Error:", dbErr);
