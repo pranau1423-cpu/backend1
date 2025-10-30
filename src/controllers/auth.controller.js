@@ -18,55 +18,58 @@ const register = async (req, res) => {
 
   // Validation
   if (!email || !password) {
-    return res.status(400).json({ 
-      error: "Email and password are required" 
+    return res.status(400).json({
+      error: "Email and password are required",
     });
   }
 
   // Email validation
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
-    return res.status(400).json({ 
-      error: "Invalid email format" 
+    return res.status(400).json({
+      error: "Invalid email format",
     });
   }
 
   // Password validation (min 8 chars, 1 uppercase, 1 number)
   if (password.length < 8) {
-    return res.status(400).json({ 
-      error: "Password must be at least 8 characters long" 
+    return res.status(400).json({
+      error: "Password must be at least 8 characters long",
     });
   }
 
   // Check if user exists
   const existingUser = await User.findOne({ email: email.toLowerCase() });
   if (existingUser) {
-    return res.status(409).json({ 
-      error: "User already exists with this email" 
+    return res.status(409).json({
+      error: "User already exists with this email",
     });
   }
 
   const registerDate = new Date();
   const passwordHash = await hashPassword(password);
-  
-  const user = new User({ 
-    email: email.toLowerCase(), 
-    registerDate, 
+
+  const user = new User({
+    email: email.toLowerCase(),
+    registerDate,
     passwordHash,
-    role: role || "user" // default to "user" role
+    role: role || "user", // default to "user" role
   });
-  
+
   await user.save();
-  
-  res.status(201).json({ 
+
+  const access = signAccess({ sub: user._id, role: user.role });
+
+  res.status(201).json({
     success: true,
     message: "User registered successfully",
+    access,
     user: {
       id: user._id,
       email: user.email,
       role: user.role,
-      registerDate: user.registerDate
-    }
+      registerDate: user.registerDate,
+    },
   });
 };
 
@@ -74,22 +77,22 @@ const login = async (req, res) => {
   const { email, password, deviceInfo } = req.body;
 
   if (!email || !password) {
-    return res.status(400).json({ 
-      error: "Email and password are required" 
+    return res.status(400).json({
+      error: "Email and password are required",
     });
   }
 
   const user = await User.findOne({ email: email.toLowerCase() });
   if (!user) {
-    return res.status(404).json({ 
-      error: "Invalid credentials" 
+    return res.status(404).json({
+      error: "Invalid credentials",
     });
   }
 
   const ok = await verifyPassword(user.passwordHash, password);
   if (!ok) {
-    return res.status(401).json({ 
-      error: "Invalid credentials" 
+    return res.status(401).json({
+      error: "Invalid credentials",
     });
   }
 
@@ -101,7 +104,7 @@ const login = async (req, res) => {
   // Store refresh token hash in session
   const hashed = cryptoHash(rid);
   const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000); // 30 days
-  
+
   user.sessions.push({
     deviceInfo: deviceInfo || req.get("User-Agent") || "Unknown device",
     refreshTokenHash: hashed,
@@ -127,25 +130,25 @@ const login = async (req, res) => {
     maxAge: 30 * 24 * 3600 * 1000, // 30 days
   });
 
-  res.json({ 
+  res.json({
     success: true,
     access,
     user: {
       id: user._id,
       email: user.email,
       role: user.role,
-      workerProfile: user.workerProfile
-    }
+      workerProfile: user.workerProfile,
+    },
   });
 };
 
 const refresh = async (req, res) => {
   const token = req.cookies[COOKIE_NAME];
-  
+
   if (!token) {
-    return res.status(401).json({ 
+    return res.status(401).json({
       error: "No refresh token provided",
-      code: "NO_REFRESH_TOKEN"
+      code: "NO_REFRESH_TOKEN",
     });
   }
 
@@ -154,18 +157,18 @@ const refresh = async (req, res) => {
     payload = verifyRefresh(token);
   } catch (err) {
     res.clearCookie(COOKIE_NAME, { path: "/" });
-    return res.status(401).json({ 
+    return res.status(401).json({
       error: "Invalid or expired refresh token",
-      code: "INVALID_REFRESH_TOKEN"
+      code: "INVALID_REFRESH_TOKEN",
     });
   }
 
   const user = await User.findById(payload.sub);
   if (!user) {
     res.clearCookie(COOKIE_NAME, { path: "/" });
-    return res.status(401).json({ 
+    return res.status(401).json({
       error: "User not found",
-      code: "USER_NOT_FOUND"
+      code: "USER_NOT_FOUND",
     });
   }
 
@@ -174,9 +177,9 @@ const refresh = async (req, res) => {
 
   if (!session) {
     res.clearCookie(COOKIE_NAME, { path: "/" });
-    return res.status(401).json({ 
+    return res.status(401).json({
       error: "Session not found",
-      code: "SESSION_NOT_FOUND"
+      code: "SESSION_NOT_FOUND",
     });
   }
 
@@ -184,9 +187,9 @@ const refresh = async (req, res) => {
     user.sessions = user.sessions.filter((s) => s.refreshTokenHash !== hashed);
     await user.save();
     res.clearCookie(COOKIE_NAME, { path: "/" });
-    return res.status(401).json({ 
+    return res.status(401).json({
       error: "Session expired",
-      code: "SESSION_EXPIRED"
+      code: "SESSION_EXPIRED",
     });
   }
 
@@ -207,20 +210,20 @@ const refresh = async (req, res) => {
     maxAge: 30 * 24 * 3600 * 1000,
   });
 
-  res.json({ 
+  res.json({
     success: true,
-    access: newAccess 
+    access: newAccess,
   });
 };
 
 const logout = async (req, res) => {
   const token = req.cookies[COOKIE_NAME];
-  
+
   if (token) {
     try {
       const payload = verifyRefresh(token);
       const user = await User.findById(payload.sub);
-      
+
       if (user) {
         const hashed = cryptoHash(payload.rid);
         user.sessions = user.sessions.filter(
@@ -232,11 +235,11 @@ const logout = async (req, res) => {
       console.error("Logout error:", e.message);
     }
   }
-  
+
   res.clearCookie(COOKIE_NAME, { path: "/" });
-  res.json({ 
+  res.json({
     success: true,
-    message: "Logged out successfully"
+    message: "Logged out successfully",
   });
 };
 
@@ -244,13 +247,13 @@ const logout = async (req, res) => {
 const me = async (req, res) => {
   try {
     const user = await User.findById(req.user.id)
-      .select('-passwordHash -sessions')
-      .populate('workerProfile');
-    
+      .select("-passwordHash -sessions")
+      .populate("workerProfile");
+
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
-    
+
     res.json({ user });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch user info" });
@@ -260,21 +263,21 @@ const me = async (req, res) => {
 // Get user sessions
 const sessions = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('sessions');
-    
+    const user = await User.findById(req.user.id).select("sessions");
+
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
-    
+
     // Don't send refresh token hashes
-    const sanitizedSessions = user.sessions.map(session => ({
+    const sanitizedSessions = user.sessions.map((session) => ({
       deviceInfo: session.deviceInfo,
       createdAt: session.createdAt,
       lastUsedAt: session.lastUsedAt,
       expiresAt: session.expiresAt,
-      _id: session._id
+      _id: session._id,
     }));
-    
+
     res.json({ sessions: sanitizedSessions });
   } catch (err) {
     res.status(500).json({ error: "Failed to fetch sessions" });
@@ -286,36 +289,26 @@ const revokeSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const user = await User.findById(req.user.id);
-    
+
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
-    
+
     const initialLength = user.sessions.length;
-    user.sessions = user.sessions.filter(
-      s => s._id.toString() !== sessionId
-    );
-    
+    user.sessions = user.sessions.filter((s) => s._id.toString() !== sessionId);
+
     if (user.sessions.length === initialLength) {
       return res.status(404).json({ error: "Session not found" });
     }
-    
+
     await user.save();
-    res.json({ 
+    res.json({
       success: true,
-      message: "Session revoked successfully" 
+      message: "Session revoked successfully",
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to revoke session" });
   }
 };
 
-export { 
-  register, 
-  login, 
-  refresh, 
-  logout, 
-  me, 
-  sessions, 
-  revokeSession 
-};
+export { register, login, refresh, logout, me, sessions, revokeSession };
