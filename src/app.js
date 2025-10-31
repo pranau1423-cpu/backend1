@@ -7,6 +7,9 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/auth.routes.js";
 import workerRoutes from "./routes/workerRoutes.js";
 import CustomerRoutes from "./routes/customer.routes.js";
+import contactRoutes from "./routes/contact.routes.js";
+import reviewRoutes from "./routes/review.routes.js";
+import notificationRoutes from "./routes/notification.routes.js";
 
 const app = express();
 
@@ -35,6 +38,11 @@ app.use((req, res, next) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/worker", workerRoutes);
 app.use("/api/customer", CustomerRoutes);
+
+// Add after existing routes:
+app.use("/api/contacts", contactRoutes);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
